@@ -178,12 +178,16 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
   const boardRef=useRef(null);
   const[drag,setDrag]=useState(null); // {r,c,piece,x,y}
   const[selected,setSelected]=useState(null); // {r,c} for tap-to-move
+  const prevFenRef=useRef(fen);
+  const animateMove=prevFenRef.current!==fen;
+  useEffect(()=>{prevFenRef.current=fen;},[fen]);
   const isPlayerPiece=(p)=>p&&(playerWhite?p===p.toUpperCase():p===p.toLowerCase());
   const toBoard=(cx,cy)=>{const rect=boardRef.current?.getBoundingClientRect();if(!rect)return null;const x=cx-rect.left,y=cy-rect.top;const vc=Math.floor(x/sq),vi=Math.floor(y/sq);if(vc<0||vc>7||vi<0||vi>7)return null;return{r:flipped?7-vi:vi,c:flipped?7-vc:vc};};
-  const handleStart=(e,r,c)=>{if(!interactive||!board[r][c])return;const p=board[r][c];if(!isPlayerPiece(p))return;e.preventDefault();const t=e.touches?e.touches[0]:e;setDrag({r,c,piece:p,x:t.clientX,y:t.clientY});setSelected(null);};
-  const handleMove=useCallback((e)=>{if(!drag)return;e.preventDefault();const t=e.touches?e.touches[0]:e;setDrag(d=>d?{...d,x:t.clientX,y:t.clientY}:null);},[drag]);
-  const handleEnd=useCallback((e)=>{if(!drag)return;e.preventDefault();const t=e.changedTouches?e.changedTouches[0]:e;const to=toBoard(t.clientX,t.clientY);if(to&&(to.r!==drag.r||to.c!==drag.c)&&onMove){onMove(drag.r,drag.c,to.r,to.c);}setDrag(null);},[drag,onMove]);
-  const handleClick=(e,r,c)=>{if(!interactive)return;if(selected){if(r!==selected.r||c!==selected.c){onMove&&onMove(selected.r,selected.c,r,c);}setSelected(null);}else{const p=board[r][c];if(isPlayerPiece(p))setSelected({r,c});}};
+  const dragMoved=useRef(false);
+  const handleStart=(e,r,c)=>{if(!interactive)return;const p=board[r][c];if(!p||!isPlayerPiece(p)){/* clicked empty/enemy square while something selected — handled in handleEnd */if(selected){e.preventDefault();return;}return;}e.preventDefault();const t=e.touches?e.touches[0]:e;dragMoved.current=false;setDrag({r,c,piece:p,x:t.clientX,y:t.clientY});};
+  const handleMove=useCallback((e)=>{if(!drag)return;e.preventDefault();const t=e.touches?e.touches[0]:e;dragMoved.current=true;setDrag(d=>d?{...d,x:t.clientX,y:t.clientY}:null);},[drag]);
+  const handleEnd=useCallback((e)=>{if(!drag)return;e.preventDefault();const t=e.changedTouches?e.changedTouches[0]:e;const to=toBoard(t.clientX,t.clientY);if(to&&(to.r!==drag.r||to.c!==drag.c)&&onMove){onMove(drag.r,drag.c,to.r,to.c);setSelected(null);setDrag(null);}else{/* released on same square = click-to-select */if(!dragMoved.current){if(selected&&selected.r===drag.r&&selected.c===drag.c){setSelected(null);}else{setSelected({r:drag.r,c:drag.c});}};setDrag(null);}},[drag,onMove,selected]);
+  const handleClick=(e,r,c)=>{if(!interactive||drag)return;if(selected){if(r!==selected.r||c!==selected.c){const p=board[r][c];if(p&&isPlayerPiece(p)){setSelected({r,c});}else{onMove&&onMove(selected.r,selected.c,r,c);setSelected(null);}}else{setSelected(null);}}else{const p=board[r][c];if(p&&isPlayerPiece(p))setSelected({r,c});}};
   useEffect(()=>{if(!drag)return;const mo=e=>handleMove(e);const up=e=>handleEnd(e);window.addEventListener("mousemove",mo);window.addEventListener("mouseup",up);window.addEventListener("touchmove",mo,{passive:false});window.addEventListener("touchend",up);return()=>{window.removeEventListener("mousemove",mo);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mo);window.removeEventListener("touchend",up);};},[drag,handleMove,handleEnd]);
   const activeRC=drag||selected;
   const targets=useMemo(()=>{if(!interactive||!activeRC)return[];return getLegalTargets(board,activeRC.r,activeRC.c,castling,ep);},[interactive,activeRC?.r,activeRC?.c,board,castling,ep]);
@@ -198,10 +202,10 @@ return <div key={i} style={{width:sq,height:sq,background:bg,position:"relative"
   const isDragging=drag&&drag.r===r&&drag.c===c;
   const tgt=isTarget(r,c);
   const hasEnemy=tgt&&p;
-  const justMoved=lastMove&&!drag&&lastMove.to[0]===r&&lastMove.to[1]===c;
+  const justMoved=animateMove&&lastMove&&!drag&&lastMove.to[0]===r&&lastMove.to[1]===c;
   const slideX=justMoved?((flipped?-(lastMove.from[1]-lastMove.to[1]):(lastMove.from[1]-lastMove.to[1]))*sq):0;
   const slideY=justMoved?((flipped?-(lastMove.from[0]-lastMove.to[0]):(lastMove.from[0]-lastMove.to[0]))*sq):0;
-return <div key={i} onMouseDown={e=>handleStart(e,r,c)} onTouchStart={e=>handleStart(e,r,c)} onClick={e=>handleClick(e,r,c)} style={{width:sq,height:sq,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",cursor:interactive&&isPlayerPiece(p)?"grab":tgt?"pointer":"default",opacity:isDragging?0.3:1}}>
+return <div key={i} onMouseDown={e=>handleStart(e,r,c)} onTouchStart={e=>handleStart(e,r,c)} onClick={e=>handleClick(e,r,c)} style={{width:sq,height:sq,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",cursor:interactive&&isPlayerPiece(p)?"grab":tgt||selected?"pointer":"default",opacity:isDragging?0.3:1}}>
 {p&&<div style={justMoved?{animation:`slideIn 0.15s ease-out`,["--sx"]:slideX+"px",["--sy"]:slideY+"px"}:{}}><Pc p={p} sz={sq}/></div>}
 {tgt&&!hasEnemy&&<div style={{position:"absolute",width:sq*0.28,height:sq*0.28,borderRadius:"50%",background:"rgba(0,0,0,0.12)"}}/>}
 {hasEnemy&&<div style={{position:"absolute",width:sq*0.85,height:sq*0.85,borderRadius:"50%",border:`${sq*0.07}px solid rgba(0,0,0,0.12)`,boxSizing:"border-box"}}/>}
