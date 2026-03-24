@@ -179,8 +179,27 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
   const[drag,setDrag]=useState(null); // {r,c,piece,x,y}
   const[selected,setSelected]=useState(null); // {r,c} for tap-to-move
   const prevFenRef=useRef(fen);
-  const animateMove=prevFenRef.current!==fen;
-  useEffect(()=>{prevFenRef.current=fen;},[fen]);
+  const prevBoardRef=useRef(board);
+  const slideInfo=useMemo(()=>{
+    if(prevFenRef.current===fen)return null;
+    const pb=prevBoardRef.current;
+    // find which square gained a piece that wasn't there (or changed)
+    // and which square lost a piece — that's the move
+    const gone=[], arrived=[];
+    for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+      const o=pb[r][c], n=board[r][c];
+      if(o&&!n)gone.push({r,c,p:o});
+      if(n&&n!==o)arrived.push({r,c,p:n});
+    }
+    // match: arrived piece type should match one of the gone pieces
+    if(arrived.length>=1&&gone.length>=1){
+      const a=arrived[0];
+      const g=gone.find(x=>x.p===a.p)||gone[0];
+      return{fromR:g.r,fromC:g.c,toR:a.r,toC:a.c};
+    }
+    return null;
+  },[fen]);
+  useEffect(()=>{prevFenRef.current=fen;prevBoardRef.current=board;},[fen,board]);
   const isPlayerPiece=(p)=>p&&(playerWhite?p===p.toUpperCase():p===p.toLowerCase());
   const toBoard=(cx,cy)=>{const rect=boardRef.current?.getBoundingClientRect();if(!rect)return null;const x=cx-rect.left,y=cy-rect.top;const vc=Math.floor(x/sq),vi=Math.floor(y/sq);if(vc<0||vc>7||vi<0||vi>7)return null;return{r:flipped?7-vi:vi,c:flipped?7-vc:vc};};
   const pending=useRef(null); // {r,c,piece,startX,startY} — mousedown recorded but not yet dragging
@@ -203,9 +222,9 @@ return <div key={i} style={{width:sq,height:sq,background:bg,position:"relative"
   const isDragging=drag&&drag.r===r&&drag.c===c;
   const tgt=isTarget(r,c);
   const hasEnemy=tgt&&p;
-  const justMoved=animateMove&&lastMove&&!drag&&lastMove.to[0]===r&&lastMove.to[1]===c;
-  const slideX=justMoved?((flipped?-(lastMove.from[1]-lastMove.to[1]):(lastMove.from[1]-lastMove.to[1]))*sq):0;
-  const slideY=justMoved?((flipped?-(lastMove.from[0]-lastMove.to[0]):(lastMove.from[0]-lastMove.to[0]))*sq):0;
+  const justMoved=slideInfo&&!drag&&slideInfo.toR===r&&slideInfo.toC===c;
+  const slideX=justMoved?((flipped?-(slideInfo.fromC-slideInfo.toC):(slideInfo.fromC-slideInfo.toC))*sq):0;
+  const slideY=justMoved?((flipped?-(slideInfo.fromR-slideInfo.toR):(slideInfo.fromR-slideInfo.toR))*sq):0;
 return <div key={i} onMouseDown={e=>handleStart(e,r,c)} onTouchStart={e=>handleStart(e,r,c)} onClick={e=>handleClick(e,r,c)} style={{width:sq,height:sq,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",cursor:interactive&&isPlayerPiece(p)?"grab":tgt||selected?"pointer":"default",opacity:isDragging?0.3:1}}>
 {p&&<div style={justMoved?{animation:`slideIn 0.15s ease-out`,["--sx"]:slideX+"px",["--sy"]:slideY+"px"}:{}}><Pc p={p} sz={sq}/></div>}
 {tgt&&!hasEnemy&&<div style={{position:"absolute",width:sq*0.28,height:sq*0.28,borderRadius:"50%",background:"rgba(0,0,0,0.12)"}}/>}
