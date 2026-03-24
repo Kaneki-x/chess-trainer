@@ -346,7 +346,7 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
     const slides=[];const isCapture=arrived.some(a=>!gone.find(x=>x.r===a.r&&x.c===a.c));
     for(const a of arrived){const g=gone.find(x=>x.p===a.p);if(g){slides.push({fromR:g.r,fromC:g.c,toR:a.r,toC:a.c});gone.splice(gone.indexOf(g),1);}}
     setSlideInfo(slides.length>0?slides:null);
-    if(slides.length>0)playSound(isCapture?"capture":"move");
+    if(slides.length>0){playSound(isCapture?"capture":"move");setTimeout(()=>setSlideInfo(null),160);}
     setSelected(null); // clear selection on board change
     prevFenRef.current=fen;prevBoardRef.current=board;
   },[fen]);
@@ -355,7 +355,7 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
   const pending=useRef(null); // {r,c,piece,startX,startY} — mousedown recorded but not yet dragging
   const handledByEnd=useRef(false); // prevent click firing after handleEnd
   const DRAG_THRESHOLD=5;
-  const handleStart=(e,r,c)=>{if(!interactive)return;handledByEnd.current=false;const p=board[r][c];if(p&&isPlayerPiece(p)){e.preventDefault();const t=e.touches?e.touches[0]:e;pending.current={r,c,piece:p,startX:t.clientX,startY:t.clientY};return;}// tapped on non-own square while piece is selected → treat as move target
+  const handleStart=(e,r,c)=>{if(!interactive)return;handledByEnd.current=false;const p=board[r][c];if(p&&isPlayerPiece(p)){const lt=getLegalTargets(board,r,c,castling,ep);if(lt.length===0)return;e.preventDefault();const t=e.touches?e.touches[0]:e;pending.current={r,c,piece:p,startX:t.clientX,startY:t.clientY};return;}// tapped on non-own square while piece is selected → treat as move target
     if(selected&&e.touches){e.preventDefault();handledByEnd.current=true;onMove&&onMove(selected.r,selected.c,r,c);setSelected(null);}};
   const handleMove=useCallback((e)=>{const t=e.touches?e.touches[0]:e;if(pending.current&&!drag){const dx=t.clientX-pending.current.startX,dy=t.clientY-pending.current.startY;if(Math.abs(dx)>DRAG_THRESHOLD||Math.abs(dy)>DRAG_THRESHOLD){e.preventDefault();const p=pending.current;setDrag({r:p.r,c:p.c,piece:p.piece,x:t.clientX,y:t.clientY});setSelected(null);pending.current=null;}return;}if(!drag)return;e.preventDefault();setDrag(d=>d?{...d,x:t.clientX,y:t.clientY}:null);},[drag]);
   const handleEnd=useCallback((e)=>{if(pending.current&&!drag){/* no drag happened = click-to-select */e.preventDefault();handledByEnd.current=true;const p=pending.current;pending.current=null;if(selected&&(selected.r!==p.r||selected.c!==p.c)){setSelected({r:p.r,c:p.c});}else if(selected&&selected.r===p.r&&selected.c===p.c){setSelected(null);}else{setSelected({r:p.r,c:p.c});}return;}if(!drag)return;e.preventDefault();handledByEnd.current=true;pending.current=null;const t=e.changedTouches?e.changedTouches[0]:e;const to=toBoard(t.clientX,t.clientY);if(to&&(to.r!==drag.r||to.c!==drag.c)&&onMove){onMove(drag.r,drag.c,to.r,to.c);setSelected(null);}setDrag(null);},[drag,onMove,selected]);
@@ -452,15 +452,25 @@ function StudyScreen({variation,onBack,color}){
       setScore(s=>({...s,total:s.total+1}));
       setDrillErrors(n=>{
         const ne=n+1;
-        if(ne>=1){
-          // show text hint
+        const oops=["不对哦～","换一个试试！","再想想！"];
+        if(ne>=1&&mode==="practice"){
+          // practice mode: show note hint
           const noteHint=variation.notes?.[step];
-          const oops=["不对哦～","换一个试试！","再想想！"];
           const hintText=noteHint?`💡 ${noteHint.s}`:oops[Math.floor(Math.random()*oops.length)];
           setDrillMsg({type:"wrong",text:hintText});
+        }else if(ne>=1){
+          // drill mode: only generic encouragement
+          setDrillMsg({type:"wrong",text:oops[Math.floor(Math.random()*oops.length)]});
         }
-        if(ne>=2){
-          // after 2 wrong: flash the correct squares on board
+        if(ne>=3&&mode==="drill"){
+          // drill: flash correct squares after 3 wrong
+          const nextPos=positions[step+1];
+          if(nextPos?.lastMove){
+            setHintSquares({from:nextPos.lastMove.from,to:nextPos.lastMove.to});
+            setTimeout(()=>setHintSquares(null),2000);
+          }
+        }else if(ne>=2&&mode==="practice"){
+          // practice: flash correct squares after 2 wrong
           const nextPos=positions[step+1];
           if(nextPos?.lastMove){
             setHintSquares({from:nextPos.lastMove.from,to:nextPos.lastMove.to});
@@ -471,7 +481,7 @@ function StudyScreen({variation,onBack,color}){
       });
       setTimeout(()=>setWrongSq(null),800);
     }
-  },[step,max,positions,drillWaiting,moves]);
+  },[step,max,positions,drillWaiting,moves,mode]);
   // Auto-play opponent's moves in drill/practice mode (including first move when playing black)
   useEffect(()=>{
     if((mode!=="drill"&&mode!=="practice")||step>=max||drillWaiting)return;
