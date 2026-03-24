@@ -173,7 +173,7 @@ function MoveArrow({from,to,sq,flipped,piece}){
     <polygon points={`${bx-px*headW/2},${by-py*headW/2} ${tx},${ty} ${bx+px*headW/2},${by+py*headW/2}`} fill={stroke}/>
   </g>;
 }
-function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playerWhite=true,onMove=null,wrongSquare=null}){
+function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playerWhite=true,onMove=null,wrongSquare=null,showArrow=true}){
   const{board,castling,ep}=parseFEN(fen);const sq=size/8;
   const boardRef=useRef(null);
   const[drag,setDrag]=useState(null); // {r,c,piece,x,y}
@@ -197,7 +197,7 @@ return <div ref={boardRef} style={{position:"relative",display:"inline-block",bo
 <div style={{display:"inline-grid",gridTemplateColumns:`repeat(8,${sq}px)`,gridTemplateRows:`repeat(8,${sq}px)`}}>
 {Array(64).fill(0).map((_,i)=>{const vi=Math.floor(i/8),vc=i%8,r=flipped?7-vi:vi,c=flipped?7-vc:vc,lt=(r+c)%2===0;const lm=lastMove&&((lastMove.from[0]===r&&lastMove.from[1]===c)||(lastMove.to[0]===r&&lastMove.to[1]===c));const sel=selected&&selected.r===r&&selected.c===c;const wrong=wrongSquare&&wrongSquare[0]===r&&wrongSquare[1]===c;let bg=lt?"#ebecd0":"#779952";if(lm)bg=lt?"#f5f682":"#bbcc44";if(wrong)bg="#e74c3c88";
 return <div key={i} style={{width:sq,height:sq,background:bg,position:"relative"}}>{sel&&<div style={{position:"absolute",inset:0,background:lt?"rgba(20,85,30,0.35)":"rgba(20,85,30,0.5)"}}/>}</div>;})}</div>
-{lastMove&&<svg style={{position:"absolute",top:0,left:0,width:sq*8,height:sq*8,pointerEvents:"none"}}><MoveArrow from={lastMove.from} to={lastMove.to} sq={sq} flipped={flipped} piece={lastMove.piece}/></svg>}
+{showArrow&&lastMove&&<svg style={{position:"absolute",top:0,left:0,width:sq*8,height:sq*8,pointerEvents:"none"}}><MoveArrow from={lastMove.from} to={lastMove.to} sq={sq} flipped={flipped} piece={lastMove.piece}/></svg>}
 <div style={{position:"absolute",top:0,left:0,display:"inline-grid",gridTemplateColumns:`repeat(8,${sq}px)`,gridTemplateRows:`repeat(8,${sq}px)`}}>
 {Array(64).fill(0).map((_,i)=>{const vi=Math.floor(i/8),vc=i%8,r=flipped?7-vi:vi,c=flipped?7-vc:vc,p=board[r][c],lt=(r+c)%2===0;
   const isDragging=drag&&drag.r===r&&drag.c===c;
@@ -222,6 +222,7 @@ function StudyScreen({variation,onBack,color}){
   const positions=useMemo(()=>computePositions(moves),[variation.moves]);
   const[step,setStep]=useState(0);
   const[auto,setAuto]=useState(false);
+  const[showArrow,setShowArrow]=useState(false);
   const[flipped,setFlipped]=useState(false);
   const[mode,setMode]=useState("study");
   const[quizActive,setQuizActive]=useState(null);
@@ -338,10 +339,12 @@ function StudyScreen({variation,onBack,color}){
     <Btn onClick={goNext} disabled={step>=max||blocked}>▶</Btn>
     <Btn onClick={()=>{if(!blocked)setStep(max);}} disabled={step>=max||blocked}>⏭</Btn>
     <Btn onClick={()=>setFlipped(f=>!f)} title="翻转棋盘">🔄</Btn>
+    <Btn onClick={()=>setShowArrow(a=>!a)} title="显示路线" accent={showArrow?color:undefined}>{showArrow?"📍":"📍"}</Btn>
   </div>}
   {mode==="drill"&&<div style={{display:"flex",gap:5,marginTop:6}}>
     <Btn onClick={()=>{setStep(0);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);}}>⏮</Btn>
     <Btn onClick={()=>setFlipped(f=>!f)}>🔄</Btn>
+    <Btn onClick={()=>setShowArrow(a=>!a)} accent={showArrow?color:undefined}>📍</Btn>
   </div>}</>;
   const progressBar=<div style={{width:"100%",marginTop:6,height:4,borderRadius:2,background:"#e0dcd6",overflow:"hidden"}}><div style={{height:"100%",borderRadius:2,background:color,width:`${max>0?(step/max)*100:0}%`,transition:"width .2s"}}/></div>;
   const moveList=<div style={{width:"100%",marginTop:8,background:"#fff",borderRadius:10,border:"1px solid #e8e4de",padding:"8px 12px",overflowX:"auto"}}>
@@ -365,7 +368,7 @@ function StudyScreen({variation,onBack,color}){
   const lessonBox=step>=max&&variation.lesson&&<div style={{width:"100%",marginTop:8,background:"#fffbe6",border:"1.5px solid #f5d442",borderRadius:10,padding:"12px 14px",fontSize:14,lineHeight:1.6,animation:"fadeS .3s ease"}}><span style={{fontWeight:800,color:"#b8860b"}}>📚 核心要点：</span>{variation.lesson}</div>;
   const scoreText=(mode==="practice"||mode==="drill")&&score.total>0&&<div style={{marginTop:8,fontSize:15,color:"#666",fontWeight:700,display:"flex",alignItems:"center",gap:4}}>{"⭐".repeat(Math.min(score.correct,10))} {score.correct}/{score.total} {score.correct===score.total&&score.total>0?"🏆 全对！太厉害了！":score.correct/score.total>=0.8?"很棒！":""}</div>;
   const stepText=<div style={{marginTop:6,fontSize:12,color:"#bbb",fontWeight:600}}>{step===0?"起始局面":`第${Math.ceil(step/2)}回合 · ${step%2===1?"白":"黑"}方走棋`} · {step}/{max}</div>;
-  const boardEl=<Board fen={pos.fen} size={bsz} lastMove={pos.lastMove} flipped={flipped} interactive={mode==="drill"&&!drillWaiting&&step<max} playerWhite={!flipped} onMove={handleDrillMove} wrongSquare={wrongSq}/>;
+  const boardEl=<Board fen={pos.fen} size={bsz} lastMove={pos.lastMove} flipped={flipped} interactive={mode==="drill"&&!drillWaiting&&step<max} playerWhite={!flipped} onMove={handleDrillMove} wrongSquare={wrongSq} showArrow={showArrow}/>;
 
   return <div style={{minHeight:"100vh",background:"linear-gradient(175deg,#faf9f6 0%,#ede9e3 100%)",fontFamily:"'Nunito',sans-serif",padding:isDesktop?"20px 32px 32px":"10px 8px 24px",display:"flex",flexDirection:"column",alignItems:"center"}}>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
