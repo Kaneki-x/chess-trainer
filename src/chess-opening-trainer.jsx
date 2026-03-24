@@ -12,6 +12,93 @@ function playSound(type){
   else if(type==="correct"){o.type="sine";o.frequency.setValueAtTime(523,t);o.frequency.setValueAtTime(659,t+0.08);g.gain.setValueAtTime(0.1,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.18);o.start(t);o.stop(t+0.18);}
 }
 
+/* ═══════════════ VOICE ═══════════════ */
+const SpeechRecognition=typeof window!=="undefined"&&(window.SpeechRecognition||window.webkitSpeechRecognition);
+const HAS_VOICE=!!SpeechRecognition;
+
+// Parse Chinese voice input to a chess move notation or navigation command
+// Returns {type:"nav",cmd:"next"|"prev"|"start"|"auto"|"pause"|"reset"|"flip"} or {type:"move",notation:string}
+function parseVoiceCommand(text){
+  const t=text.trim().toLowerCase().replace(/\s+/g,"");
+  // Navigation commands
+  if(/下一步|下一个|下一招|next/.test(t))return{type:"nav",cmd:"next"};
+  if(/上一步|上一个|上一招|back/.test(t))return{type:"nav",cmd:"prev"};
+  if(/回到开头|从头开始|重新开始|重来/.test(t))return{type:"nav",cmd:"start"};
+  if(/自动播放|自动|开始播放|播放/.test(t))return{type:"nav",cmd:"auto"};
+  if(/暂停|停/.test(t))return{type:"nav",cmd:"pause"};
+  if(/翻转|换边/.test(t))return{type:"nav",cmd:"flip"};
+  // Castling
+  if(/王车易位|短易位|小易位/.test(t))return{type:"move",notation:"O-O"};
+  if(/长易位|大易位|后翼易位/.test(t))return{type:"move",notation:"O-O-O"};
+  // Piece names mapping
+  const pieceMap={"王":"K","后":"Q","车":"R","象":"B","马":"N","主教":"B","骑士":"N","皇后":"Q","国王":"K","城堡":"R"};
+  // Try to extract piece + target square
+  // e.g. "马到f3" "马f3" "象到c4" "兵到e4" "e4"
+  // Normalize: 到/去/走 are connectors, remove them
+  let s=t.replace(/到|去|走|吃/g,"");
+  // Map Chinese column names that speech might produce
+  // a=a, b=b/比, c=c/西/思, d=d/地/第, e=e/一/义, f=f/哎辅, g=g/记/鸡, h=h/哎吃
+  // Map Chinese number pronunciations for columns
+  const colFix={"诶":"a","哎":"a","比":"b","bee":"b","西":"c","see":"c","思":"c","地":"d","第":"d","dee":"d",
+    "一":"e","义":"e","已":"e","亦":"e","衣":"e","ee":"e","以":"e",
+    "艾弗":"f","爱抚":"f","哎辅":"f","唉服":"f",
+    "鸡":"g","记":"g","基":"g","几":"g","机":"g","吉":"g",
+    "爱吃":"h","哎吃":"h","艾吃":"h","H":"h"};
+  for(const[k,v]of Object.entries(colFix))s=s.replace(new RegExp(k,"g"),v);
+  // Extract piece prefix
+  let piece="";
+  for(const[cn,en]of Object.entries(pieceMap)){
+    if(s.startsWith(cn)){piece=en;s=s.slice(cn.length);break;}
+  }
+  if(s.startsWith("兵")){piece="";s=s.slice(1);} // pawn has no letter prefix
+  // Now s should be like "f3", "e4", etc.
+  // Try to match [a-h][1-8]
+  const m=s.match(/([a-h])([1-8])/);
+  if(m){
+    const notation=piece+m[1]+m[2];
+    return{type:"move",notation};
+  }
+  return null;
+}
+
+function useVoice(onCommand){
+  const[listening,setListening]=useState(false);
+  const[voiceText,setVoiceText]=useState("");
+  const recRef=useRef(null);
+  const start=useCallback(()=>{
+    if(!HAS_VOICE||recRef.current)return;
+    const rec=new SpeechRecognition();
+    rec.lang="zh-CN";rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=3;
+    rec.onresult=(e)=>{
+      let final="",interim="";
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal){final+=t;}else{interim+=t;}
+      }
+      if(interim)setVoiceText(interim);
+      if(final){
+        setVoiceText(final);
+        // Try all alternatives for better matching
+        const lastResult=e.results[e.results.length-1];
+        let cmd=null;
+        for(let a=0;a<lastResult.length;a++){
+          cmd=parseVoiceCommand(lastResult[a].transcript);
+          if(cmd)break;
+        }
+        if(cmd)onCommand(cmd);
+        setTimeout(()=>setVoiceText(""),1500);
+      }
+    };
+    rec.onerror=(e)=>{if(e.error!=="no-speech"&&e.error!=="aborted"){setListening(false);recRef.current=null;}};
+    rec.onend=()=>{if(recRef.current){try{rec.start();}catch(e){setListening(false);recRef.current=null;}}};
+    try{rec.start();recRef.current=rec;setListening(true);}catch(e){setListening(false);}
+  },[onCommand]);
+  const stop=useCallback(()=>{if(recRef.current){const r=recRef.current;recRef.current=null;r.stop();setListening(false);setVoiceText("");}},[]);
+  const toggle=useCallback(()=>{listening?stop():start();},[listening,start,stop]);
+  useEffect(()=>()=>{if(recRef.current){recRef.current.stop();recRef.current=null;}},[]);
+  return{listening,voiceText,toggle};
+}
+
 /* ═══════════════ PIECES ═══════════════ */
 const pieceImg=(p)=>{
   const color=p===p.toUpperCase()?"w":"b";
@@ -354,7 +441,26 @@ function StudyScreen({variation,onBack,color}){
   const goNext=useCallback(()=>{if(blocked)return;setStep(s=>Math.min(max,s+1));setQuizActive(null);setQuizAnswer(null);},[blocked,max]);
   const noteColor=note?.t==="bad"?"#c0392b":note?.t==="good"?"#27ae60":note?.t==="key"?"#2980b9":note?.t==="forced"?"#7f8c8d":"#e67e22";
   const noteIcon=note?.t==="bad"?"❌":note?.t==="good"?"✅":note?.t==="key"?"⭐":note?.t==="forced"?"⚡":"💡";
-  const modeResetProps={onClick:m=>()=>{setMode(m);setStep(0);setQuizActive(null);setQuizAnswer(null);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);}};
+  const resetDrillState=useCallback(()=>{setStep(0);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);},[]);
+  const modeResetProps={onClick:m=>()=>{setMode(m);resetDrillState();}};
+  // Voice control
+  const handleVoiceCmd=useCallback((cmd)=>{
+    if(cmd.type==="nav"){
+      if(cmd.cmd==="next"){if(mode==="study")setStep(s=>Math.min(max,s+1));}
+      else if(cmd.cmd==="prev"){if(mode==="study")setStep(s=>Math.max(0,s-1));}
+      else if(cmd.cmd==="start")resetDrillState();
+      else if(cmd.cmd==="auto")setAuto(true);
+      else if(cmd.cmd==="pause")setAuto(false);
+      else if(cmd.cmd==="flip")setFlipped(f=>!f);
+    }else if(cmd.type==="move"&&(mode==="drill"||mode==="practice")){
+      // Resolve the voice move notation against current position
+      const curFen=pos.fen;
+      const result=resolveMove(curFen,cmd.notation);
+      if(result){handleDrillMove(result.from[0],result.from[1],result.to[0],result.to[1]);}
+      else{playSound("wrong");}
+    }
+  },[mode,max,pos.fen,handleDrillMove,resetDrillState]);
+  const{listening,voiceText,toggle:toggleVoice}=useVoice(handleVoiceCmd);
   /* ---- shared sub-components ---- */
   const headerBar=<div style={{width:"100%",display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
     <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#888",padding:"2px 6px"}}>←</button>
@@ -375,7 +481,12 @@ function StudyScreen({variation,onBack,color}){
     :<div style={{fontSize:15,color:"#888",fontWeight:700}}>轮到你走{flipped?"黑":"白"}棋啦～</div>}
   </div>;
   const resetDrill=()=>{setStep(0);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);};
-  const controlBtns=<>{mode==="study"&&<div style={{display:"flex",gap:5,marginTop:10}}>
+  const micBtn=HAS_VOICE&&<Btn onClick={toggleVoice} accent={listening?"#e74c3c":undefined}>{listening?"🎤":"🎙️"}</Btn>;
+  const voiceStatus=listening&&<div style={{width:"100%",marginTop:4,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+    <span style={{width:8,height:8,borderRadius:"50%",background:"#e74c3c",animation:"hintPulse 0.5s ease-in-out infinite alternate"}}/>
+    <span style={{fontSize:12,color:"#999",fontWeight:600}}>{voiceText||"语音识别中…说出棋步或指令"}</span>
+  </div>;
+  const controlBtns=<>{mode==="study"&&<div style={{display:"flex",gap:5,marginTop:10,flexWrap:"wrap",justifyContent:"center"}}>
     <Btn onClick={()=>setStep(0)} disabled={step===0}>⏮</Btn>
     <Btn onClick={()=>{setStep(s=>Math.max(0,s-1));}} disabled={step===0}>◀</Btn>
     <Btn onClick={()=>setAuto(a=>!a)} accent={color}>{auto?"⏸":"▶"}</Btn>
@@ -383,12 +494,15 @@ function StudyScreen({variation,onBack,color}){
     <Btn onClick={()=>setStep(max)} disabled={step>=max}>⏭</Btn>
     <Btn onClick={()=>setFlipped(f=>!f)}>🔄</Btn>
     <Btn onClick={()=>setShowArrow(a=>!a)} accent={showArrow?color:undefined}>📍</Btn>
+    {micBtn}
   </div>}
-  {(mode==="drill"||mode==="practice")&&<div style={{display:"flex",gap:5,marginTop:6}}>
+  {(mode==="drill"||mode==="practice")&&<div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap",justifyContent:"center"}}>
     <Btn onClick={resetDrill}>⏮</Btn>
     <Btn onClick={()=>setFlipped(f=>!f)}>🔄</Btn>
     <Btn onClick={()=>setShowArrow(a=>!a)} accent={showArrow?color:undefined}>📍</Btn>
-  </div>}</>;
+    {micBtn}
+  </div>}
+  {voiceStatus}</>;
   const progressBar=<div style={{width:"100%",marginTop:6,height:4,borderRadius:2,background:"#e0dcd6",overflow:"hidden"}}><div style={{height:"100%",borderRadius:2,background:color,width:`${max>0?(step/max)*100:0}%`,transition:"width .2s"}}/></div>;
   const moveList=<div style={{width:"100%",marginTop:8,background:"#fff",borderRadius:10,border:"1px solid #e8e4de",padding:"8px 12px",overflowX:"auto"}}>
     <div style={{display:"flex",flexWrap:"wrap",gap:"2px 0",fontSize:13,fontWeight:600,lineHeight:1.8}}>
