@@ -185,7 +185,7 @@ function MoveArrow({from,to,sq,flipped,piece}){
     <polygon points={`${bx-px*headW/2},${by-py*headW/2} ${tx},${ty} ${bx+px*headW/2},${by+py*headW/2}`} fill={stroke}/>
   </g>;
 }
-function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playerWhite=true,onMove=null,wrongSquare=null,showArrow=true}){
+function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playerWhite=true,onMove=null,wrongSquare=null,showArrow=true,hintSquares=null}){
   const{board,castling,ep}=parseFEN(fen);const sq=size/8;
   const boardRef=useRef(null);
   const[drag,setDrag]=useState(null); // {r,c,piece,x,y}
@@ -226,7 +226,8 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
 return <div ref={boardRef} style={{position:"relative",display:"inline-block",borderRadius:3,overflow:"hidden",boxShadow:"0 6px 28px rgba(0,0,0,.18)",border:"3px solid #302e2b",touchAction:"none"}}>
 <div style={{display:"inline-grid",gridTemplateColumns:`repeat(8,${sq}px)`,gridTemplateRows:`repeat(8,${sq}px)`}}>
 {Array(64).fill(0).map((_,i)=>{const vi=Math.floor(i/8),vc=i%8,r=flipped?7-vi:vi,c=flipped?7-vc:vc,lt=(r+c)%2===0;const lm=lastMove&&((lastMove.from[0]===r&&lastMove.from[1]===c)||(lastMove.to[0]===r&&lastMove.to[1]===c));const sel=selected&&selected.r===r&&selected.c===c;const wrong=wrongSquare&&wrongSquare[0]===r&&wrongSquare[1]===c;let bg=lt?"#ebecd0":"#779952";if(lm)bg=lt?"#f5f682":"#bbcc44";if(wrong)bg="#e74c3c88";
-return <div key={i} style={{width:sq,height:sq,background:bg,position:"relative"}}>{sel&&<div style={{position:"absolute",inset:0,background:lt?"rgba(20,85,30,0.35)":"rgba(20,85,30,0.5)"}}/>}</div>;})}</div>
+const isHint=hintSquares&&((hintSquares.from[0]===r&&hintSquares.from[1]===c)||(hintSquares.to[0]===r&&hintSquares.to[1]===c));
+return <div key={i} style={{width:sq,height:sq,background:bg,position:"relative"}}>{sel&&<div style={{position:"absolute",inset:0,background:lt?"rgba(20,85,30,0.35)":"rgba(20,85,30,0.5)"}}/>}{isHint&&<div style={{position:"absolute",inset:0,background:"rgba(41,128,185,0.45)",animation:"hintPulse 0.6s ease-in-out infinite alternate"}}/>}</div>;})}</div>
 {showArrow&&lastMove&&<svg style={{position:"absolute",top:0,left:0,width:sq*8,height:sq*8,pointerEvents:"none"}}><MoveArrow from={lastMove.from} to={lastMove.to} sq={sq} flipped={flipped} piece={lastMove.piece}/></svg>}
 <div style={{position:"absolute",top:0,left:0,display:"inline-grid",gridTemplateColumns:`repeat(8,${sq}px)`,gridTemplateRows:`repeat(8,${sq}px)`}}>
 {Array(64).fill(0).map((_,i)=>{const vi=Math.floor(i/8),vc=i%8,r=flipped?7-vi:vi,c=flipped?7-vc:vc,p=board[r][c],lt=(r+c)%2===0;
@@ -262,6 +263,7 @@ function StudyScreen({variation,onBack,color}){
   const[wrongSq,setWrongSq]=useState(null);
   const[drillWaiting,setDrillWaiting]=useState(false);
   const[drillErrors,setDrillErrors]=useState(0);
+  const[hintSquares,setHintSquares]=useState(null); // {from:[r,c],to:[r,c]} flash correct move
   const ref=useRef(null);
   const drillTimer=useRef(null);
   const max=positions.length-1;
@@ -272,8 +274,8 @@ function StudyScreen({variation,onBack,color}){
   useEffect(()=>{const h=()=>setWinSize({w:window.innerWidth,h:window.innerHeight});window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   const isDesktop=winSize.w>=768;
   const bsz=isDesktop?Math.min(winSize.h-120,720):Math.min(winSize.w-16,560);
-  useEffect(()=>{setStep(0);setAuto(false);setQuizActive(null);setQuizAnswer(null);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);},[variation]);
-  useEffect(()=>{if(auto&&step<max){ref.current=setTimeout(()=>setStep(s=>s+1),2000);return()=>clearTimeout(ref.current);}if(step>=max)setAuto(false);},[auto,step,max]);
+  useEffect(()=>{setStep(0);setAuto(false);setQuizActive(null);setQuizAnswer(null);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);},[variation]);
+  useEffect(()=>{if(auto&&step<max){const hasNote=variation.notes?.[step];ref.current=setTimeout(()=>setStep(s=>s+1),hasNote?3500:1800);return()=>clearTimeout(ref.current);}if(step>=max)setAuto(false);},[auto,step,max]);
   // keyboard arrow keys for stepping (study/practice modes)
   useEffect(()=>{if(mode==="drill")return;const h=(e)=>{if(e.key==="ArrowLeft"){e.preventDefault();setStep(s=>Math.max(0,s-1));setQuizActive(null);setQuizAnswer(null);}else if(e.key==="ArrowRight"){e.preventDefault();setStep(s=>Math.min(max,s+1));}};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);},[mode,max]);
   // In drill mode: flipped = playing black, !flipped = playing white
@@ -291,7 +293,7 @@ function StudyScreen({variation,onBack,color}){
     if(!nextPos||!nextPos.lastMove)return;
     const exp=nextPos.lastMove;
     if(fr===exp.from[0]&&fc===exp.from[1]&&tr===exp.to[0]&&tc===exp.to[1]){
-      setStep(s=>s+1);setWrongSq(null);setDrillErrors(0);
+      setStep(s=>s+1);setWrongSq(null);setDrillErrors(0);setHintSquares(null);
       setScore(s=>({correct:s.correct+1,total:s.total+1}));playSound("correct");
       const cheers=["太棒了！","真聪明！","好厉害！","答对啦！","没错！","你真棒！","厉害！"];
       setDrillMsg({type:"correct",text:cheers[Math.floor(Math.random()*cheers.length)]});
@@ -309,22 +311,29 @@ function StudyScreen({variation,onBack,color}){
       setScore(s=>({...s,total:s.total+1}));
       setDrillErrors(n=>{
         const ne=n+1;
-        if(ne>=2){
-          const hint=moves[step];
+        if(ne>=1){
+          // show text hint
           const noteHint=variation.notes?.[step];
-          setDrillMsg({type:"wrong",text:noteHint?`提示：${noteHint.s}`:`提示：这一步是 ${hint}`});
-        }else{
-          const oops=["不对哦，再想想！","换一个试试！","差一点点，再来！"];
-          setDrillMsg({type:"wrong",text:oops[Math.floor(Math.random()*oops.length)]});
+          const oops=["不对哦～","换一个试试！","再想想！"];
+          const hintText=noteHint?`💡 ${noteHint.s}`:oops[Math.floor(Math.random()*oops.length)];
+          setDrillMsg({type:"wrong",text:hintText});
+        }
+        if(ne>=2){
+          // after 2 wrong: flash the correct squares on board
+          const nextPos=positions[step+1];
+          if(nextPos?.lastMove){
+            setHintSquares({from:nextPos.lastMove.from,to:nextPos.lastMove.to});
+            setTimeout(()=>setHintSquares(null),2000);
+          }
         }
         return ne;
       });
       setTimeout(()=>setWrongSq(null),800);
     }
   },[step,max,positions,drillWaiting,moves]);
-  // Auto-play opponent's moves in drill mode (including first move when playing black)
+  // Auto-play opponent's moves in drill/practice mode (including first move when playing black)
   useEffect(()=>{
-    if(mode!=="drill"||step>=max||drillWaiting)return;
+    if((mode!=="drill"&&mode!=="practice")||step>=max||drillWaiting)return;
     if(!isPlayerTurn(step)){
       setDrillWaiting(true);
       drillTimer.current=setTimeout(()=>{
@@ -335,7 +344,7 @@ function StudyScreen({variation,onBack,color}){
     }
   },[mode,step,max,drillWaiting,isPlayerTurn]);
   useEffect(()=>{
-    if(mode==="drill"&&step>=max&&!drillWaiting){setDrillMsg({type:"done",text:"太棒了，全部完成！你是小棋王！"});}
+    if((mode==="drill"||mode==="practice")&&step>=max&&!drillWaiting){setDrillMsg({type:"done",text:"太棒了，全部完成！你是小棋王！"});}
   },[step,max,mode,drillWaiting]);
   useEffect(()=>()=>{clearTimeout(drillTimer.current);},[]);
   useEffect(()=>{if(mode==="practice"&&variation.quiz){const qi=variation.quiz.findIndex(q=>q.step===moveIdx);if(qi>=0&&quizActive!==qi){setQuizActive(qi);setQuizAnswer(null);}}},[step,mode,variation.quiz,moveIdx]);
@@ -344,44 +353,45 @@ function StudyScreen({variation,onBack,color}){
   const goNext=useCallback(()=>{if(blocked)return;setStep(s=>Math.min(max,s+1));setQuizActive(null);setQuizAnswer(null);},[blocked,max]);
   const noteColor=note?.t==="bad"?"#c0392b":note?.t==="good"?"#27ae60":note?.t==="key"?"#2980b9":note?.t==="forced"?"#7f8c8d":"#e67e22";
   const noteIcon=note?.t==="bad"?"❌":note?.t==="good"?"✅":note?.t==="key"?"⭐":note?.t==="forced"?"⚡":"💡";
-  const modeResetProps={onClick:m=>()=>{setMode(m);setStep(0);setQuizActive(null);setQuizAnswer(null);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);}};
+  const modeResetProps={onClick:m=>()=>{setMode(m);setStep(0);setQuizActive(null);setQuizAnswer(null);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);}};
   /* ---- shared sub-components ---- */
   const headerBar=<div style={{width:"100%",display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
     <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#888",padding:"2px 6px"}}>←</button>
     <div style={{flex:1}}><h3 style={{margin:0,fontSize:15,color:"#2d2d3a",fontWeight:800}}>{variation.name}</h3>
       {variation.result&&<span style={{fontSize:11,color:"#999",fontWeight:600}}>{variation.result==="1-0"?"白胜":variation.result==="0-1"?"黑胜":"学习变化"}</span>}</div>
     <div style={{display:"flex",borderRadius:8,overflow:"hidden",border:"1.5px solid #ddd"}}>
-      {["study","practice","drill"].map(m=><button key={m} onClick={modeResetProps.onClick(m)} style={{padding:"7px 14px",fontSize:13,fontWeight:700,border:"none",cursor:"pointer",background:mode===m?color:"#fff",color:mode===m?"#fff":"#666",transition:"all .15s"}}>{m==="study"?"📖 学习":m==="practice"?"🎯 练习":"🎹 盲练"}</button>)}
+      {["study","practice","drill"].map(m=><button key={m} onClick={modeResetProps.onClick(m)} style={{padding:"7px 14px",fontSize:13,fontWeight:700,border:"none",cursor:"pointer",background:mode===m?color:"#fff",color:mode===m?"#fff":"#666",transition:"all .15s"}}>{m==="study"?"📖 学习":m==="practice"?"🎯 跟练":"🎹 盲练"}</button>)}
     </div>
   </div>;
-  const drillFeedback=mode==="drill"&&<div style={{width:"100%",marginTop:8,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>
+  const drillFeedback=(mode==="drill"||mode==="practice")&&<div style={{width:"100%",marginTop:8,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>
     {drillMsg?<div style={{padding:"10px 20px",borderRadius:12,fontWeight:800,fontSize:16,animation:"fadeS .2s ease",
       background:drillMsg.type==="correct"?"#e8f8e8":drillMsg.type==="wrong"?"#fce8e8":"linear-gradient(135deg,#fffbe6,#fff3c4)",
       color:drillMsg.type==="correct"?"#1a7a3a":drillMsg.type==="wrong"?"#c0392b":"#b8860b",
       border:`2px solid ${drillMsg.type==="correct"?"#2ecc7150":drillMsg.type==="wrong"?"#e74c3c50":"#f5d44260"}`,
       boxShadow:drillMsg.type==="done"?"0 4px 16px rgba(245,212,66,.3)":"none"
     }}>{drillMsg.type==="correct"?"⭐ ":drillMsg.type==="wrong"?"💪 ":"🏆 "}{drillMsg.text}{drillMsg.type==="done"&&score.total>0?` ${score.correct}/${score.total}`:""}</div>
-    :step===0?<div style={{fontSize:15,color:"#888",fontWeight:700}}>拖动{flipped?"黑":"白"}棋走出正确的开局！加油！💪</div>
+    :step===0?<div style={{fontSize:15,color:"#888",fontWeight:700}}>{mode==="practice"?"看着棋谱，":""}拖动{flipped?"黑":"白"}棋走出正确的开局！加油！💪</div>
     :<div style={{fontSize:15,color:"#888",fontWeight:700}}>轮到你走{flipped?"黑":"白"}棋啦～</div>}
   </div>;
-  const controlBtns=<>{mode!=="drill"&&<div style={{display:"flex",gap:5,marginTop:10}}>
+  const resetDrill=()=>{setStep(0);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);};
+  const controlBtns=<>{mode==="study"&&<div style={{display:"flex",gap:5,marginTop:10}}>
     <Btn onClick={()=>setStep(0)} disabled={step===0}>⏮</Btn>
-    <Btn onClick={()=>{setStep(s=>Math.max(0,s-1));setQuizActive(null);setQuizAnswer(null);}} disabled={step===0}>◀</Btn>
+    <Btn onClick={()=>{setStep(s=>Math.max(0,s-1));}} disabled={step===0}>◀</Btn>
     <Btn onClick={()=>setAuto(a=>!a)} accent={color}>{auto?"⏸":"▶"}</Btn>
-    <Btn onClick={goNext} disabled={step>=max||blocked}>▶</Btn>
-    <Btn onClick={()=>{if(!blocked)setStep(max);}} disabled={step>=max||blocked}>⏭</Btn>
-    <Btn onClick={()=>setFlipped(f=>!f)} title="翻转棋盘">🔄</Btn>
-    <Btn onClick={()=>setShowArrow(a=>!a)} title="显示路线" accent={showArrow?color:undefined}>{showArrow?"📍":"📍"}</Btn>
+    <Btn onClick={goNext} disabled={step>=max}>▶</Btn>
+    <Btn onClick={()=>setStep(max)} disabled={step>=max}>⏭</Btn>
+    <Btn onClick={()=>setFlipped(f=>!f)}>🔄</Btn>
+    <Btn onClick={()=>setShowArrow(a=>!a)} accent={showArrow?color:undefined}>📍</Btn>
   </div>}
-  {mode==="drill"&&<div style={{display:"flex",gap:5,marginTop:6}}>
-    <Btn onClick={()=>{setStep(0);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);}}>⏮</Btn>
+  {(mode==="drill"||mode==="practice")&&<div style={{display:"flex",gap:5,marginTop:6}}>
+    <Btn onClick={resetDrill}>⏮</Btn>
     <Btn onClick={()=>setFlipped(f=>!f)}>🔄</Btn>
     <Btn onClick={()=>setShowArrow(a=>!a)} accent={showArrow?color:undefined}>📍</Btn>
   </div>}</>;
   const progressBar=<div style={{width:"100%",marginTop:6,height:4,borderRadius:2,background:"#e0dcd6",overflow:"hidden"}}><div style={{height:"100%",borderRadius:2,background:color,width:`${max>0?(step/max)*100:0}%`,transition:"width .2s"}}/></div>;
   const moveList=<div style={{width:"100%",marginTop:8,background:"#fff",borderRadius:10,border:"1px solid #e8e4de",padding:"8px 12px",overflowX:"auto"}}>
     <div style={{display:"flex",flexWrap:"wrap",gap:"2px 0",fontSize:13,fontWeight:600,lineHeight:1.8}}>
-      {moves.map((m,idx)=>{const active=idx===moveIdx,wm=idx%2===0,mn=Math.floor(idx/2)+1;const n=variation.notes?.[idx];const nc=n?.t==="bad"?"#c0392b":n?.t==="good"?"#27ae60":n?.t==="key"?"#2980b9":null;const hidden=(mode==="practice"||mode==="drill")&&idx>moveIdx;
+      {moves.map((m,idx)=>{const active=idx===moveIdx,wm=idx%2===0,mn=Math.floor(idx/2)+1;const n=variation.notes?.[idx];const nc=n?.t==="bad"?"#c0392b":n?.t==="good"?"#27ae60":n?.t==="key"?"#2980b9":null;const hidden=mode==="drill"&&idx>moveIdx;
       return <span key={idx}>{wm&&<span style={{color:"#bbb",fontSize:11,marginLeft:4}}>{mn}.</span>}
       <span onClick={()=>{if(!hidden){setStep(idx+1);setQuizActive(null);setQuizAnswer(null);}}} style={{cursor:hidden?"default":"pointer",padding:"1px 4px",borderRadius:4,background:active?color:"transparent",color:hidden?"transparent":active?"#fff":nc||"#444",transition:"all .15s",textDecorationLine:nc&&!active?"underline":"none",textDecorationStyle:"dotted",textUnderlineOffset:"3px"}}>{hidden?"???":m.replace(/[#]/g,"")}</span></span>;})}
     </div>
@@ -398,16 +408,21 @@ function StudyScreen({variation,onBack,color}){
     {quizAnswer!==null&&<button onClick={goNext} style={{marginTop:8,padding:"8px 20px",borderRadius:8,background:color,color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:14}}>继续 →</button>}
   </div>;
   const lessonBox=step>=max&&variation.lesson&&<div style={{width:"100%",marginTop:8,background:"#fffbe6",border:"1.5px solid #f5d442",borderRadius:10,padding:"12px 14px",fontSize:14,lineHeight:1.6,animation:"fadeS .3s ease"}}><span style={{fontWeight:800,color:"#b8860b"}}>📚 核心要点：</span>{variation.lesson}</div>;
+  const completionBox=step>=max&&<div style={{width:"100%",marginTop:10,display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center",animation:"fadeS .3s ease"}}>
+    {mode==="study"&&<button onClick={modeResetProps.onClick("drill")} style={{padding:"10px 20px",borderRadius:10,background:color,color:"#fff",border:"none",cursor:"pointer",fontWeight:800,fontSize:15}}>🎹 去盲练！</button>}
+    {mode==="drill"&&<button onClick={()=>{setStep(0);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);setHintSquares(null);}} style={{padding:"10px 20px",borderRadius:10,background:color,color:"#fff",border:"none",cursor:"pointer",fontWeight:800,fontSize:15}}>🔄 再来一次！</button>}
+    <button onClick={onBack} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#666",border:"1.5px solid #ddd",cursor:"pointer",fontWeight:700,fontSize:14}}>📚 换一个开局</button>
+  </div>;
   const scoreText=(mode==="practice"||mode==="drill")&&score.total>0&&<div style={{marginTop:8,fontSize:15,color:"#666",fontWeight:700,display:"flex",alignItems:"center",gap:4}}>{"⭐".repeat(Math.min(score.correct,10))} {score.correct}/{score.total} {score.correct===score.total&&score.total>0?"🏆 全对！太厉害了！":score.correct/score.total>=0.8?"很棒！":""}</div>;
   const stepText=<div style={{marginTop:6,fontSize:12,color:"#bbb",fontWeight:600}}>{step===0?"起始局面":`第${Math.ceil(step/2)}回合 · ${step%2===1?"白":"黑"}方走棋`} · {step}/{max}</div>;
-  const boardEl=<Board fen={pos.fen} size={bsz} lastMove={pos.lastMove} flipped={flipped} interactive={mode==="drill"&&!drillWaiting&&step<max} playerWhite={!flipped} onMove={handleDrillMove} wrongSquare={wrongSq} showArrow={showArrow}/>;
+  const boardEl=<Board fen={pos.fen} size={bsz} lastMove={pos.lastMove} flipped={flipped} interactive={(mode==="drill"||mode==="practice")&&!drillWaiting&&step<max} playerWhite={!flipped} onMove={handleDrillMove} wrongSquare={wrongSq} showArrow={showArrow} hintSquares={hintSquares}/>;
 
   return <div style={{minHeight:"100vh",background:"linear-gradient(175deg,#faf9f6 0%,#ede9e3 100%)",fontFamily:"'Nunito',sans-serif",padding:isDesktop?"20px 32px 32px":"10px 8px 24px",display:"flex",flexDirection:"column",alignItems:"center"}}>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
     <div style={{width:"100%",maxWidth:bsz,display:"flex",flexDirection:"column",alignItems:"center"}}>
-      {headerBar}{boardEl}{drillFeedback}{controlBtns}{progressBar}{moveList}{noteBox}{quizBox}{lessonBox}{scoreText}{stepText}
+      {headerBar}{boardEl}{drillFeedback}{controlBtns}{progressBar}{moveList}{noteBox}{quizBox}{lessonBox}{completionBox}{scoreText}{stepText}
     </div>
-    <style>{`@keyframes fadeS{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}@keyframes slideIn{from{transform:translate(var(--sx),var(--sy))}to{transform:translate(0,0)}}`}</style>
+    <style>{`@keyframes fadeS{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}@keyframes slideIn{from{transform:translate(var(--sx),var(--sy))}to{transform:translate(0,0)}}@keyframes hintPulse{from{opacity:0.3}to{opacity:0.6}}`}</style>
   </div>;
 }
 function Btn({children,onClick,disabled,accent}){return <button onClick={onClick} disabled={disabled} style={{width:50,height:44,borderRadius:10,border:"1.5px solid #d5d0c8",background:accent&&!disabled?accent:"#fff",color:accent&&!disabled?"#fff":disabled?"#ccc":"#555",fontSize:18,fontWeight:700,cursor:disabled?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:disabled?.5:1,transition:"all .15s"}}>{children}</button>;}
