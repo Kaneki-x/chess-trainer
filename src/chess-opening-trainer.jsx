@@ -180,34 +180,32 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
   const[selected,setSelected]=useState(null); // {r,c} for tap-to-move
   const prevFenRef=useRef(fen);
   const prevBoardRef=useRef(board);
-  const slideInfo=useMemo(()=>{
-    if(prevFenRef.current===fen)return null;
+  const[slideInfo,setSlideInfo]=useState(null);
+  useEffect(()=>{
+    if(prevFenRef.current===fen){setSlideInfo(null);prevFenRef.current=fen;prevBoardRef.current=board;return;}
     const pb=prevBoardRef.current;
-    // find which square gained a piece that wasn't there (or changed)
-    // and which square lost a piece — that's the move
     const gone=[], arrived=[];
     for(let r=0;r<8;r++)for(let c=0;c<8;c++){
       const o=pb[r][c], n=board[r][c];
       if(o&&!n)gone.push({r,c,p:o});
       if(n&&n!==o)arrived.push({r,c,p:n});
     }
-    // match: arrived piece type should match one of the gone pieces
-    if(arrived.length>=1&&gone.length>=1){
-      const a=arrived[0];
-      const g=gone.find(x=>x.p===a.p)||gone[0];
-      return{fromR:g.r,fromC:g.c,toR:a.r,toC:a.c};
-    }
-    return null;
+    // build slide list for all moved pieces (handles castling: king + rook)
+    const slides=[];
+    for(const a of arrived){const g=gone.find(x=>x.p===a.p);if(g){slides.push({fromR:g.r,fromC:g.c,toR:a.r,toC:a.c});gone.splice(gone.indexOf(g),1);}}
+    setSlideInfo(slides.length>0?slides:null);
+    setSelected(null); // clear selection on board change
+    prevFenRef.current=fen;prevBoardRef.current=board;
   },[fen]);
-  useEffect(()=>{prevFenRef.current=fen;prevBoardRef.current=board;},[fen,board]);
   const isPlayerPiece=(p)=>p&&(playerWhite?p===p.toUpperCase():p===p.toLowerCase());
   const toBoard=(cx,cy)=>{const rect=boardRef.current?.getBoundingClientRect();if(!rect)return null;const x=cx-rect.left,y=cy-rect.top;const vc=Math.floor(x/sq),vi=Math.floor(y/sq);if(vc<0||vc>7||vi<0||vi>7)return null;return{r:flipped?7-vi:vi,c:flipped?7-vc:vc};};
   const pending=useRef(null); // {r,c,piece,startX,startY} — mousedown recorded but not yet dragging
+  const handledByEnd=useRef(false); // prevent click firing after handleEnd
   const DRAG_THRESHOLD=5;
-  const handleStart=(e,r,c)=>{if(!interactive)return;const p=board[r][c];if(!p||!isPlayerPiece(p))return;e.preventDefault();const t=e.touches?e.touches[0]:e;pending.current={r,c,piece:p,startX:t.clientX,startY:t.clientY};};
+  const handleStart=(e,r,c)=>{if(!interactive)return;const p=board[r][c];if(!p||!isPlayerPiece(p))return;e.preventDefault();const t=e.touches?e.touches[0]:e;handledByEnd.current=false;pending.current={r,c,piece:p,startX:t.clientX,startY:t.clientY};};
   const handleMove=useCallback((e)=>{const t=e.touches?e.touches[0]:e;if(pending.current&&!drag){const dx=t.clientX-pending.current.startX,dy=t.clientY-pending.current.startY;if(Math.abs(dx)>DRAG_THRESHOLD||Math.abs(dy)>DRAG_THRESHOLD){e.preventDefault();const p=pending.current;setDrag({r:p.r,c:p.c,piece:p.piece,x:t.clientX,y:t.clientY});setSelected(null);pending.current=null;}return;}if(!drag)return;e.preventDefault();setDrag(d=>d?{...d,x:t.clientX,y:t.clientY}:null);},[drag]);
-  const handleEnd=useCallback((e)=>{if(pending.current&&!drag){/* no drag happened = click */e.preventDefault();const p=pending.current;pending.current=null;if(selected&&(selected.r!==p.r||selected.c!==p.c)){/* selected piece + clicked another own piece = switch */setSelected({r:p.r,c:p.c});}else if(selected&&selected.r===p.r&&selected.c===p.c){setSelected(null);}else{setSelected({r:p.r,c:p.c});}return;}if(!drag)return;e.preventDefault();pending.current=null;const t=e.changedTouches?e.changedTouches[0]:e;const to=toBoard(t.clientX,t.clientY);if(to&&(to.r!==drag.r||to.c!==drag.c)&&onMove){onMove(drag.r,drag.c,to.r,to.c);setSelected(null);}setDrag(null);},[drag,onMove,selected]);
-  const handleClick=(e,r,c)=>{if(!interactive)return;if(selected){const p=board[r][c];if(p&&isPlayerPiece(p)){setSelected({r,c});}else{onMove&&onMove(selected.r,selected.c,r,c);setSelected(null);}}};
+  const handleEnd=useCallback((e)=>{if(pending.current&&!drag){/* no drag happened = click-to-select */e.preventDefault();handledByEnd.current=true;const p=pending.current;pending.current=null;if(selected&&(selected.r!==p.r||selected.c!==p.c)){setSelected({r:p.r,c:p.c});}else if(selected&&selected.r===p.r&&selected.c===p.c){setSelected(null);}else{setSelected({r:p.r,c:p.c});}return;}if(!drag)return;e.preventDefault();handledByEnd.current=true;pending.current=null;const t=e.changedTouches?e.changedTouches[0]:e;const to=toBoard(t.clientX,t.clientY);if(to&&(to.r!==drag.r||to.c!==drag.c)&&onMove){onMove(drag.r,drag.c,to.r,to.c);setSelected(null);}setDrag(null);},[drag,onMove,selected]);
+  const handleClick=(e,r,c)=>{if(!interactive||handledByEnd.current){handledByEnd.current=false;return;}if(selected){const p=board[r][c];if(p&&isPlayerPiece(p)){setSelected({r,c});}else{onMove&&onMove(selected.r,selected.c,r,c);setSelected(null);}}};
   useEffect(()=>{const mo=e=>handleMove(e);const up=e=>handleEnd(e);window.addEventListener("mousemove",mo);window.addEventListener("mouseup",up);window.addEventListener("touchmove",mo,{passive:false});window.addEventListener("touchend",up);return()=>{window.removeEventListener("mousemove",mo);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mo);window.removeEventListener("touchend",up);};},[handleMove,handleEnd]);
   const activeRC=drag||selected;
   const targets=useMemo(()=>{if(!interactive||!activeRC)return[];return getLegalTargets(board,activeRC.r,activeRC.c,castling,ep);},[interactive,activeRC?.r,activeRC?.c,board,castling,ep]);
@@ -222,11 +220,11 @@ return <div key={i} style={{width:sq,height:sq,background:bg,position:"relative"
   const isDragging=drag&&drag.r===r&&drag.c===c;
   const tgt=isTarget(r,c);
   const hasEnemy=tgt&&p;
-  const justMoved=slideInfo&&!drag&&slideInfo.toR===r&&slideInfo.toC===c;
-  const slideX=justMoved?((flipped?-(slideInfo.fromC-slideInfo.toC):(slideInfo.fromC-slideInfo.toC))*sq):0;
-  const slideY=justMoved?((flipped?-(slideInfo.fromR-slideInfo.toR):(slideInfo.fromR-slideInfo.toR))*sq):0;
+  const sl=slideInfo&&!drag&&slideInfo.find(s=>s.toR===r&&s.toC===c);
+  const slideX=sl?((flipped?-(sl.fromC-sl.toC):(sl.fromC-sl.toC))*sq):0;
+  const slideY=sl?((flipped?-(sl.fromR-sl.toR):(sl.fromR-sl.toR))*sq):0;
 return <div key={i} onMouseDown={e=>handleStart(e,r,c)} onTouchStart={e=>handleStart(e,r,c)} onClick={e=>handleClick(e,r,c)} style={{width:sq,height:sq,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",cursor:interactive&&isPlayerPiece(p)?"grab":tgt||selected?"pointer":"default",opacity:isDragging?0.3:1}}>
-{p&&<div style={justMoved?{animation:`slideIn 0.15s ease-out`,["--sx"]:slideX+"px",["--sy"]:slideY+"px"}:{}}><Pc p={p} sz={sq}/></div>}
+{p&&<div style={sl?{animation:`slideIn 0.15s ease-out`,["--sx"]:slideX+"px",["--sy"]:slideY+"px"}:{}}><Pc p={p} sz={sq}/></div>}
 {tgt&&!hasEnemy&&<div style={{position:"absolute",width:sq*0.28,height:sq*0.28,borderRadius:"50%",background:"rgba(0,0,0,0.12)"}}/>}
 {hasEnemy&&<div style={{position:"absolute",width:sq*0.85,height:sq*0.85,borderRadius:"50%",border:`${sq*0.07}px solid rgba(0,0,0,0.12)`,boxSizing:"border-box"}}/>}
 {vi===7&&<span style={{position:"absolute",bottom:1,right:2,fontSize:Math.max(9,sq*.16),color:lt?"#779952":"#ebecd0",fontWeight:800,fontFamily:"'Nunito',sans-serif",pointerEvents:"none"}}>{"abcdefgh"[c]}</span>}
