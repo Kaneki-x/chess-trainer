@@ -1,5 +1,17 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
+/* ═══════════════ SOUND ═══════════════ */
+const audioCtx=typeof window!=="undefined"?new (window.AudioContext||window.webkitAudioContext)():null;
+function playSound(type){
+  if(!audioCtx)return;if(audioCtx.state==="suspended")audioCtx.resume();
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime;
+  o.connect(g);g.connect(audioCtx.destination);
+  if(type==="move"){o.type="sine";o.frequency.setValueAtTime(600,t);o.frequency.exponentialRampToValueAtTime(400,t+0.06);g.gain.setValueAtTime(0.12,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.08);o.start(t);o.stop(t+0.08);}
+  else if(type==="capture"){o.type="triangle";o.frequency.setValueAtTime(300,t);o.frequency.exponentialRampToValueAtTime(150,t+0.1);g.gain.setValueAtTime(0.18,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.12);o.start(t);o.stop(t+0.12);}
+  else if(type==="wrong"){o.type="square";o.frequency.setValueAtTime(200,t);g.gain.setValueAtTime(0.08,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.15);o.start(t);o.stop(t+0.15);}
+  else if(type==="correct"){o.type="sine";o.frequency.setValueAtTime(523,t);o.frequency.setValueAtTime(659,t+0.08);g.gain.setValueAtTime(0.1,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.18);o.start(t);o.stop(t+0.18);}
+}
+
 /* ═══════════════ PIECES ═══════════════ */
 const pieceImg=(p)=>{
   const color=p===p.toUpperCase()?"w":"b";
@@ -191,9 +203,10 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
       if(n&&n!==o)arrived.push({r,c,p:n});
     }
     // build slide list for all moved pieces (handles castling: king + rook)
-    const slides=[];
+    const slides=[];const isCapture=arrived.some(a=>!gone.find(x=>x.r===a.r&&x.c===a.c));
     for(const a of arrived){const g=gone.find(x=>x.p===a.p);if(g){slides.push({fromR:g.r,fromC:g.c,toR:a.r,toC:a.c});gone.splice(gone.indexOf(g),1);}}
     setSlideInfo(slides.length>0?slides:null);
+    if(slides.length>0)playSound(isCapture?"capture":"move");
     setSelected(null); // clear selection on board change
     prevFenRef.current=fen;prevBoardRef.current=board;
   },[fen]);
@@ -205,8 +218,8 @@ function Board({fen,size=480,lastMove=null,flipped=false,interactive=false,playe
   const handleStart=(e,r,c)=>{if(!interactive)return;const p=board[r][c];if(!p||!isPlayerPiece(p))return;e.preventDefault();const t=e.touches?e.touches[0]:e;handledByEnd.current=false;pending.current={r,c,piece:p,startX:t.clientX,startY:t.clientY};};
   const handleMove=useCallback((e)=>{const t=e.touches?e.touches[0]:e;if(pending.current&&!drag){const dx=t.clientX-pending.current.startX,dy=t.clientY-pending.current.startY;if(Math.abs(dx)>DRAG_THRESHOLD||Math.abs(dy)>DRAG_THRESHOLD){e.preventDefault();const p=pending.current;setDrag({r:p.r,c:p.c,piece:p.piece,x:t.clientX,y:t.clientY});setSelected(null);pending.current=null;}return;}if(!drag)return;e.preventDefault();setDrag(d=>d?{...d,x:t.clientX,y:t.clientY}:null);},[drag]);
   const handleEnd=useCallback((e)=>{if(pending.current&&!drag){/* no drag happened = click-to-select */e.preventDefault();handledByEnd.current=true;const p=pending.current;pending.current=null;if(selected&&(selected.r!==p.r||selected.c!==p.c)){setSelected({r:p.r,c:p.c});}else if(selected&&selected.r===p.r&&selected.c===p.c){setSelected(null);}else{setSelected({r:p.r,c:p.c});}return;}if(!drag)return;e.preventDefault();handledByEnd.current=true;pending.current=null;const t=e.changedTouches?e.changedTouches[0]:e;const to=toBoard(t.clientX,t.clientY);if(to&&(to.r!==drag.r||to.c!==drag.c)&&onMove){onMove(drag.r,drag.c,to.r,to.c);setSelected(null);}setDrag(null);},[drag,onMove,selected]);
-  const handleClick=(e,r,c)=>{if(!interactive||handledByEnd.current){handledByEnd.current=false;return;}if(selected){const p=board[r][c];if(p&&isPlayerPiece(p)){setSelected({r,c});}else{onMove&&onMove(selected.r,selected.c,r,c);setSelected(null);}}};
-  useEffect(()=>{const mo=e=>handleMove(e);const up=e=>handleEnd(e);window.addEventListener("mousemove",mo);window.addEventListener("mouseup",up);window.addEventListener("touchmove",mo,{passive:false});window.addEventListener("touchend",up);return()=>{window.removeEventListener("mousemove",mo);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mo);window.removeEventListener("touchend",up);};},[handleMove,handleEnd]);
+  const handleClick=(e,r,c)=>{if(!interactive||handledByEnd.current){handledByEnd.current=false;return;}if(selected){const p=board[r][c];if(p&&isPlayerPiece(p)){setSelected({r,c});}else if(isTarget(r,c)){onMove&&onMove(selected.r,selected.c,r,c);setSelected(null);}else{setSelected(null);/* click non-target = deselect */}}};
+  useEffect(()=>{const mo=e=>handleMove(e);const up=e=>handleEnd(e);const cancel=()=>{pending.current=null;setDrag(null);};window.addEventListener("mousemove",mo);window.addEventListener("mouseup",up);window.addEventListener("touchmove",mo,{passive:false});window.addEventListener("touchend",up);window.addEventListener("touchcancel",cancel);document.addEventListener("mouseleave",cancel);return()=>{window.removeEventListener("mousemove",mo);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mo);window.removeEventListener("touchend",up);window.removeEventListener("touchcancel",cancel);document.removeEventListener("mouseleave",cancel);};},[handleMove,handleEnd]);
   const activeRC=drag||selected;
   const targets=useMemo(()=>{if(!interactive||!activeRC)return[];return getLegalTargets(board,activeRC.r,activeRC.c,castling,ep);},[interactive,activeRC?.r,activeRC?.c,board,castling,ep]);
   const isTarget=(r,c)=>targets.some(t=>t[0]===r&&t[1]===c);
@@ -230,7 +243,7 @@ return <div key={i} onMouseDown={e=>handleStart(e,r,c)} onTouchStart={e=>handleS
 {vi===7&&<span style={{position:"absolute",bottom:1,right:2,fontSize:Math.max(9,sq*.16),color:lt?"#779952":"#ebecd0",fontWeight:800,fontFamily:"'Nunito',sans-serif",pointerEvents:"none"}}>{"abcdefgh"[c]}</span>}
 {vc===0&&<span style={{position:"absolute",top:1,left:2,fontSize:Math.max(9,sq*.16),color:lt?"#779952":"#ebecd0",fontWeight:800,fontFamily:"'Nunito',sans-serif",pointerEvents:"none"}}>{8-r}</span>}
 </div>;})}</div>
-{drag&&<div style={{position:"fixed",left:drag.x-sq/2,top:drag.y-sq/2,width:sq,height:sq,pointerEvents:"none",zIndex:1000,filter:"drop-shadow(0 4px 8px rgba(0,0,0,.3))"}}><Pc p={drag.piece} sz={sq}/></div>}
+{drag&&<div style={{position:"fixed",left:drag.x-sq*0.55,top:drag.y-sq*0.55,width:sq*1.1,height:sq*1.1,pointerEvents:"none",zIndex:1000,filter:"drop-shadow(0 6px 12px rgba(0,0,0,.35))"}}><Pc p={drag.piece} sz={sq*1.1}/></div>}
 </div>;}
 
 /* ═══════════════ STUDY + PRACTICE SCREEN ═══════════════ */
@@ -261,6 +274,8 @@ function StudyScreen({variation,onBack,color}){
   const bsz=isDesktop?Math.min(winSize.h-120,720):Math.min(winSize.w-16,560);
   useEffect(()=>{setStep(0);setAuto(false);setQuizActive(null);setQuizAnswer(null);setScore({correct:0,total:0});setDrillMsg(null);setWrongSq(null);setDrillWaiting(false);setDrillErrors(0);},[variation]);
   useEffect(()=>{if(auto&&step<max){ref.current=setTimeout(()=>setStep(s=>s+1),2000);return()=>clearTimeout(ref.current);}if(step>=max)setAuto(false);},[auto,step,max]);
+  // keyboard arrow keys for stepping (study/practice modes)
+  useEffect(()=>{if(mode==="drill")return;const h=(e)=>{if(e.key==="ArrowLeft"){e.preventDefault();setStep(s=>Math.max(0,s-1));setQuizActive(null);setQuizAnswer(null);}else if(e.key==="ArrowRight"){e.preventDefault();setStep(s=>Math.min(max,s+1));}};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);},[mode,max]);
   // In drill mode: flipped = playing black, !flipped = playing white
   // moves[0]=white, moves[1]=black, moves[2]=white...
   // step is the position index; move at step corresponds to moves[step] (0-indexed)
@@ -277,7 +292,7 @@ function StudyScreen({variation,onBack,color}){
     const exp=nextPos.lastMove;
     if(fr===exp.from[0]&&fc===exp.from[1]&&tr===exp.to[0]&&tc===exp.to[1]){
       setStep(s=>s+1);setWrongSq(null);setDrillErrors(0);
-      setScore(s=>({correct:s.correct+1,total:s.total+1}));
+      setScore(s=>({correct:s.correct+1,total:s.total+1}));playSound("correct");
       const cheers=["太棒了！","真聪明！","好厉害！","答对啦！","没错！","你真棒！","厉害！"];
       setDrillMsg({type:"correct",text:cheers[Math.floor(Math.random()*cheers.length)]});
       // auto-play opponent's response after delay
@@ -290,7 +305,7 @@ function StudyScreen({variation,onBack,color}){
         setDrillWaiting(false);
       },800);
     }else{
-      setWrongSq([tr,tc]);
+      setWrongSq([tr,tc]);playSound("wrong");
       setScore(s=>({...s,total:s.total+1}));
       setDrillErrors(n=>{
         const ne=n+1;
